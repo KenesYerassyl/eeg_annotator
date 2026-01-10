@@ -1,0 +1,55 @@
+from dataclasses import dataclass
+
+
+@dataclass()
+class Config:
+    app_name: str = "Annotate"
+    # diagnosis options
+    diagnosis = [
+        'AR',
+        'BR',
+        'TR',
+        'DR',
+        'MR',
+        'AOR',
+        'DSR',
+        'PHS',
+        'SHW',
+        'SPW',
+        'GED',
+        'LED',
+        'EYBL',
+        'ARTF',
+        'BCKG',
+        'SEIZ',
+        'FNSZ',
+        'GNSZ',
+        'SPSZ',
+        'CPSZ',
+        'ABSZ',
+        'TNSZ',
+        'CNSZ',
+        'TCSZ',
+        'ATSZ',
+        'MYSZ',
+        'NESZ',
+        'INTR',
+        'SLOW',
+        'EYEM',
+        'CHEW',
+        'SHIV',
+        'MUSC',
+        'EMA',
+        'ELST',
+        'CALB',
+        'HPHS',
+        'TRIP',
+        'EMA',
+        'NDAR',
+        'ASSA',
+        'BSSA',
+        'TSSA',
+        'DSSA',
+        'IFCN',
+    ]
+    pan_ammount: int = 10
