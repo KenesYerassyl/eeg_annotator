@@ -1,55 +1,115 @@
+# =============================================================================
+# GitHub Actions Workflow: Build Ziyatron EEG Annotator
+# =============================================================================
+#
+# WHAT THIS DOES:
+#   Builds standalone executables (.exe for Windows, app for macOS) so
+#   neurologists can run the app without installing Python.
+#
+# HOW IT WORKS:
+#   1. GitHub spins up virtual machines (one Windows, one macOS)
+#   2. Installs Python and your dependencies on each
+#   3. Runs PyInstaller to create a standalone executable
+#   4. Packages it into a ZIP file
+#   5. If this was triggered by a version tag (e.g., v2.0.1), creates a
+#      Release page on GitHub with both ZIPs ready for download
+#
+# HOW TO USE:
+#   - Push any commit to main or open a PR  → builds run (no release created)
+#   - Click "Run workflow" in Actions tab   → builds run (no release created)
+#   - Push a version tag                    → builds run AND release is created
+#       git tag v2.0.1
+#       git push origin v2.0.1
+#
+# =============================================================================
+
 name: Build Ziyatron EEG Annotator
 
+# --- TRIGGERS ---
+# "on" defines WHEN this workflow runs.
 on:
   push:
     tags:
-      - 'v*'  # Trigger on version tags (e.g., v2.0.0)
-  workflow_dispatch:  # Allow manual trigger
+      - 'v*'  # Runs when you push a tag starting with "v" (e.g., v2.0.0, v2.1.0)
+  workflow_dispatch:  # Adds a "Run workflow" button in the GitHub Actions tab
   pull_request:
-    branches: [ main ]
+    branches: [ main ]  # Runs when a PR targets the main branch
 
+# =============================================================================
+# JOB 1: BUILD
+# =============================================================================
+# Builds the app on Windows and macOS in parallel.
+# Each OS gets its own virtual machine (called a "runner").
+# =============================================================================
 jobs:
   build:
+    # "strategy.matrix" runs this job multiple times with different settings.
+    # Here it runs twice: once on Windows, once on macOS — in parallel.
     strategy:
-      fail-fast: false
+      fail-fast: false  # If one OS fails, still try the other
       matrix:
         os: [windows-latest, macos-latest]
-        python-version: ['3.10']
 
+    # "runs-on" picks the virtual machine. ${{ matrix.os }} gets replaced
+    # with "windows-latest" or "macos-latest" from the matrix above.
     runs-on: ${{ matrix.os }}
 
     steps:
+      # --- Step 1: Get the code ---
+      # Downloads your repository onto the virtual machine.
+      # Without this, the runner has an empty filesystem.
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.python-version }}
+      # --- Step 2: Install Python ---
+      # GitHub runners have Python pre-installed, but we want a specific version.
+      # cache: 'pip' saves downloaded packages between runs so future builds
+      # don't re-download everything (saves 1-2 minutes).
+      - name: Set up Python 3.10
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: '3.10'
           cache: 'pip'
 
+      # --- Step 3: Install dependencies ---
+      # Same as running "pip install -r requirements.txt" on your own machine.
+      # This installs mne, PyQt6, pyqtgraph, pyinstaller, and everything else.
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # --- Step 4: Build the executable ---
+      # PyInstaller reads main.spec (your build config) and creates a standalone
+      # executable in the dist/eeg_annotator/ folder. The spec file already
+      # handles all optimizations (excluding matplotlib, unused Qt modules, etc.)
+      # This step takes 5-15 minutes.
       - name: Build with PyInstaller
-        run: |
-          pyinstaller main.spec
+        run: pyinstaller main.spec
 
-      - name: List build outputs (Linux/macOS)
+      # --- Step 5: Show build size in the logs ---
+      # This prints the total bundle size so you can monitor for bloat.
+      # Target: under 200MB. If it grows past that, check what's being included.
+      - name: Log build size (macOS)
         if: runner.os != 'Windows'
         run: |
+          echo "=== Build output ==="
           ls -lah dist/
+          echo "=== Total bundle size ==="
           du -sh dist/eeg_annotator/
 
-      - name: List build outputs (Windows)
+      - name: Log build size (Windows)
         if: runner.os == 'Windows'
         run: |
+          echo "=== Build output ==="
           dir dist\
+          echo "=== Total bundle size ==="
           powershell -c "'{0:N2} MB' -f ((Get-ChildItem dist\eeg_annotator -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB)"
 
-      - name: Create ZIP archive (Linux/macOS)
+      # --- Step 6: Create a ZIP file ---
+      # Packages the entire dist/eeg_annotator/ folder into a single ZIP.
+      # Named "eeg_annotator-macOS.zip" or "eeg_annotator-Windows.zip".
+      - name: Create ZIP archive (macOS)
         if: runner.os != 'Windows'
         run: |
           cd dist
@@ -61,58 +121,81 @@ jobs:
           cd dist
           powershell Compress-Archive -Path eeg_annotator -DestinationPath ../eeg_annotator-${{ runner.os }}.zip
 
-      - name: Upload build artifacts
+      # --- Step 7: Upload the ZIP as an artifact ---
+      # "Artifacts" are files stored by GitHub for 30 days. You can download
+      # them from the Actions tab even without creating a release.
+      # The release job (below) also downloads these to attach to the release.
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: eeg_annotator-${{ runner.os }}-py${{ matrix.python-version }}
+          name: eeg_annotator-${{ runner.os }}
           path: eeg_annotator-${{ runner.os }}.zip
           retention-days: 30
 
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v1
-        with:
-          files: eeg_annotator-${{ runner.os }}.zip
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  # ===========================================================================
+  # JOB 2: RELEASE
+  # ===========================================================================
+  # Creates a GitHub Release with both ZIP files attached.
+  # Only runs when you push a version tag (e.g., v2.0.1).
+  # Waits for BOTH Windows and macOS builds to finish before running.
+  #
+  # Why a separate job? If both build jobs tried to create the release
+  # simultaneously, they'd conflict. This job runs once after both finish.
+  # ===========================================================================
+  release:
+    needs: build  # Waits for the build job to finish on ALL matrix entries
+    runs-on: ubuntu-latest  # Lightweight Linux runner (just creating a release)
+    if: startsWith(github.ref, 'refs/tags/v')  # Only for version tags
 
-  release-info:
-    needs: build
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Permission needed to create releases on your repository
+    permissions:
+      contents: write
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Create release notes
-        run: |
-          echo "## Ziyatron EEG Annotator ${{ github.ref_name }}" > release_notes.md
-          echo "" >> release_notes.md
-          echo "### Improvements in v2.0.0" >> release_notes.md
-          echo "- 🚀 **10x faster** rendering with PyQtGraph" >> release_notes.md
-          echo "- 💾 **10x less memory** usage with lazy loading" >> release_notes.md
-          echo "- 📦 **3x smaller** bundle size (150MB vs 500MB)" >> release_notes.md
-          echo "- ⚡ Smooth pan/zoom on low-RAM laptops (4-8GB)" >> release_notes.md
-          echo "- 📂 Support for 100MB+ EDF files" >> release_notes.md
-          echo "- ✅ Backward compatible with existing annotations" >> release_notes.md
-          echo "" >> release_notes.md
-          echo "### Downloads" >> release_notes.md
-          echo "- **Windows**: eeg_annotator-Windows.zip" >> release_notes.md
-          echo "- **macOS**: eeg_annotator-macOS.zip" >> release_notes.md
-          echo "" >> release_notes.md
-          echo "### Installation" >> release_notes.md
-          echo "1. Download the ZIP file for your platform" >> release_notes.md
-          echo "2. Extract the archive" >> release_notes.md
-          echo "3. Run \`eeg_annotator\` executable" >> release_notes.md
-          cat release_notes.md
-
-      - name: Update release description
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v1
+      # --- Step 1: Download the ZIPs from both builds ---
+      # actions/download-artifact grabs the files uploaded in step 7 above.
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
         with:
-          body_path: release_notes.md
+          path: artifacts
+
+      # --- Step 2: Show what was downloaded (for debugging) ---
+      - name: List downloaded artifacts
+        run: find artifacts -type f -name "*.zip"
+
+      # --- Step 3: Create the GitHub Release ---
+      # This creates a Release page (like github.com/you/repo/releases)
+      # with both ZIPs attached for download.
+      #
+      # generate_release_notes: true makes GitHub auto-create a changelog
+      # from all commits since the previous tag. No hardcoded notes needed!
+      #
+      # The "body" field adds a download table and install instructions
+      # above the auto-generated changelog.
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/eeg_annotator-macOS/eeg_annotator-macOS.zip
+            artifacts/eeg_annotator-Windows/eeg_annotator-Windows.zip
+          generate_release_notes: true
+          body: |
+            ## Ziyatron EEG Annotator ${{ github.ref_name }}
+
+            ### Downloads
+            | Platform | File |
+            |----------|------|
+            | Windows | `eeg_annotator-Windows.zip` |
+            | macOS | `eeg_annotator-macOS.zip` |
+
+            ### Installation
+            1. Download the ZIP file for your platform
+            2. Extract the archive
+            3. Run the `eeg_annotator` executable
+            4. **macOS users**: If you see a security warning, right-click the app and select "Open"
+
+            ---
+          draft: false
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
