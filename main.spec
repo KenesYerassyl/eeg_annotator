@@ -77,7 +77,6 @@ excludes = [
     # Unused stdlib modules
     'tkinter',
     'turtle',
-    'unittest',
     'distutils',
     'setuptools',
     'pip',
