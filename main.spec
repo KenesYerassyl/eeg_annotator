@@ -3,11 +3,10 @@
 """Optimized PyInstaller spec for Ziyatron EEG Annotator.
 
 Key optimizations:
-- Selective MNE imports (not collect_all) - saves 300-400MB
-- Excludes matplotlib and dependencies - saves 50-80MB
+- Excludes MNE test data/examples/datasets - saves 300-400MB
 - Excludes unused PyQt6 modules - saves 100-180MB
 - Enables strip and UPX compression
-- Expected bundle size: 150-200MB (vs 500-600MB before)
+- Expected bundle size: 200-250MB
 """
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
@@ -46,25 +45,11 @@ datas = [
 
 # ===== EXCLUSIONS =====
 # Exclude packages we don't use to reduce bundle size
+#
+# NOTE: matplotlib and PIL are NOT excluded despite our app using PyQtGraph.
+# MNE's internal modules (mne.channels → mne.bem → mne.viz) hardcode
+# 'import matplotlib' at the top level, so it must be present in the bundle.
 excludes = [
-    # Matplotlib and dependencies (replaced with PyQtGraph)
-    'matplotlib',
-    'matplotlib.backends',
-    'matplotlib.pyplot',
-    'mpl_toolkits',
-    'matplotlib.testing',
-    'matplotlib.tests',
-
-    # Matplotlib dependencies
-    'kiwisolver',
-    'cycler',
-    'fonttools',
-    'contourpy',
-
-    # Unused image libraries
-    'PIL',
-    'Pillow',
-
     # Development and testing tools
     'IPython',
     'jupyter',
