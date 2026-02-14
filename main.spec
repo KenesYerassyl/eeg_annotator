@@ -10,7 +10,7 @@ Key optimizations:
 - Expected bundle size: 150-200MB (vs 500-600MB before)
 """
 
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 import sys
 
 # ===== SELECTIVE MNE DATA COLLECTION =====
@@ -27,15 +27,10 @@ mne_data = collect_data_files(
     ]
 )
 
-# Only include specific MNE modules we actually use
-mne_imports = [
-    'mne.io.edf',
-    'mne.io.edf.edf',
-    'mne.filter',
-    'mne.preprocessing',
-    'mne.channels',
-    'mne.channels.montage',
-]
+# Collect ALL MNE submodules as hidden imports.
+# MNE uses lazy_loader extensively — PyInstaller can't detect these imports.
+# Only adds ~9MB of .py files (the large data/tests are excluded above).
+mne_imports = collect_submodules('mne')
 
 # PyQtGraph hidden imports
 pyqtgraph_imports = [
