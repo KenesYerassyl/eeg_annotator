@@ -2,7 +2,7 @@
 from typing import List, Dict, Optional, Tuple
 
 import pyqtgraph as pg
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QRectF
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -317,10 +317,10 @@ class EEGPlotWidget(QWidget):
         if obj == self.plot_widget and event.type() == event.Type.KeyPress:
             key_event: QKeyEvent = event
 
-            if key_event.key() == Qt.Key.Key_Left:
+            if key_event.key() == Qt.Key.Key_A:
                 self.pan_left()
                 return True
-            elif key_event.key() == Qt.Key.Key_Right:
+            elif key_event.key() == Qt.Key.Key_D:
                 self.pan_right()
                 return True
             elif key_event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
@@ -430,8 +430,18 @@ class EEGPlotWidget(QWidget):
         if self.state:
             self.state.enable_undo_button.emit(True)
 
+    def _get_plot_bounds(self) -> QRectF:
+        """Get the plot boundaries as a QRectF for constraining annotation movement."""
+        n_channels = len(self.montage_list)
+        y_min = -self.scale_factor
+        y_height = (n_channels - 1) * self.scale_factor + 2 * self.scale_factor
+        return QRectF(0, y_min, self.signal_duration, y_height)
+
     def _create_editable_annotation_rect(self, annotation_roi: AnnotationROI) -> AnnotationROI:
         """Create an editable annotation rectangle with event handlers."""
+
+        # Restrict movement to plot boundaries
+        annotation_roi.maxBounds = self._get_plot_bounds()
 
         # Connect signals for data synchronization
         annotation_roi.sigRegionChangeFinished.connect(lambda: self._on_annotation_moved(annotation_roi))

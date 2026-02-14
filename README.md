@@ -2,30 +2,6 @@
 
 High-performance EEG annotation tool for neuro-physicians, optimized for low-memory environments (4-8GB RAM laptops).
 
-## ✨ What's New in v2.0
-
-### Performance Improvements
-- **10x faster** rendering - PyQtGraph replaces Matplotlib
-- **10x less memory** - Lazy loading with windowed data streaming
-- **3x smaller** bundle - Optimized PyInstaller configuration
-- **Smooth operation** on low-RAM laptops with 100MB+ EDF files
-
-### Development Improvements
-- **Automated builds** - GitHub Actions for Windows and macOS
-- **No more VM builds** - Cross-platform builds in the cloud
-- **Professional structure** - Clean MVC-like architecture
-- **Better maintainability** - Modular, testable code
-
-### Key Metrics
-| Metric | v1.0 (Old) | v2.0 (New) | Improvement |
-|--------|-----------|-----------|-------------|
-| RAM usage (100MB EDF) | 400-500MB | 30-50MB | **10x** |
-| Pan/zoom response | 200-500ms | 16-50ms | **10x** |
-| Bundle size | 500MB | 150MB | **3x** |
-| Max file size | ~200MB | 1GB+ | **5x** |
-
----
-
 ## 🚀 Quick Start
 
 ### Running from Source
@@ -126,8 +102,6 @@ window = streamer.get_window(start=0, duration=10)  # Only 10s → 2MB RAM
 
 ### PyQtGraph Rendering
 
-Replaced Matplotlib with PyQtGraph for 10-100x faster rendering:
-
 ```python
 # Automatic downsampling when zoomed out
 curve = plot_widget.plot(
@@ -150,16 +124,10 @@ curve = plot_widget.plot(
 ```python
 # Exclude bloat
 excludes = [
-    'matplotlib',          # Replaced with PyQtGraph
     'PyQt6.QtWebEngine',   # 100MB, unused
     'mne/tests/**',        # Test data
     # ... (see full list in main.spec)
 ]
-
-# Selective MNE imports (not collect_all)
-mne_data = collect_data_files('mne',
-    excludes=['**/tests/**', '**/examples/**', '**/datasets/**']
-)
 ```
 
 **Result:** 500MB → 150MB bundle size
@@ -182,20 +150,17 @@ mne_data = collect_data_files('mne',
 - ✅ 54 pre-defined diagnosis labels (AR, BR, SEIZ, etc.)
 - ✅ Multi-channel annotation support
 - ✅ Undo functionality
-- ✅ CSV persistence (backward compatible with v1.0)
 
 ### File Format
 
 Annotations are saved as CSV: `{filename}_{montage}.csv`
 
-```csv
-channels,start_time,stop_time,onset
-FP1-F7,10,15,SEIZ
-F7-T3,10,15,SEIZ
-T3-T5,10,15,SEIZ
-```
 
-**Backward compatibility:** v2.0 can read annotations created with v1.0
+| channels | start_time | stop_time | onset |
+|----------|------------|-----------|-------|
+| FP1-F7 | 10 | 15 | SEIZ |
+| F7-T3 | 10 | 15 | SEIZ |
+| T3-T5 | 10 | 15 | SEIZ |
 
 ---
 
@@ -254,7 +219,7 @@ git push origin v2.0.0
 # 5. Add release notes
 ```
 
-**Build time:** ~10-15 minutes per platform
+**Build time:** ~3-5 minutes per platform
 
 ### Manual Deployment
 
@@ -351,23 +316,6 @@ If builds fail on GitHub Actions:
 3. Check action logs for specific error messages
 4. Test build locally first: `pyinstaller main.spec`
 
----
-
-## 📊 Performance Benchmarks
-
-Tested on 4GB RAM laptop with 100MB EDF file:
-
-| Operation | v1.0 (Matplotlib) | v2.0 (PyQtGraph) | Speedup |
-|-----------|------------------|------------------|---------|
-| File open | 3-5s | 0.5-1s | 5x |
-| Initial render | 2-3s | 0.2-0.3s | 10x |
-| Pan left/right | 200-500ms | 16-50ms | 10x |
-| Zoom in/out | 200-500ms | 16-50ms | 10x |
-| Memory (idle) | 400-500MB | 30-50MB | 10x |
-| Memory (peak) | 800MB+ | 80-100MB | 8x |
-
----
-
 ## 🤝 Contributing
 
 ### Development Setup
@@ -401,12 +349,6 @@ python main.py
 
 ---
 
-## 📄 License
-
-[Add your license here]
-
----
-
 ## 👏 Acknowledgments
 
 Built with:
@@ -421,10 +363,10 @@ Built with:
 
 For issues and questions:
 - GitHub Issues: [Create an issue](https://github.com/yourusername/eeg_annotator/issues)
-- Email: your.email@example.com
+- Email: kenesyerassyl@gmail.com
 
 ---
 
 **Version:** 2.0.0
-**Author:** [Your Name]
+**Author:** Kenes Yerassyl
 **Last Updated:** 2026-02-09
