@@ -2,7 +2,7 @@
 from typing import List, Dict, Optional, Tuple
 
 import pyqtgraph as pg
-from PyQt6.QtCore import Qt, QRectF
+from PyQt6.QtCore import Qt, QRectF, QPointF
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -10,8 +10,9 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QComboBox,
     QLabel,
+    QGraphicsRectItem,
 )
-from PyQt6.QtGui import QKeyEvent
+from PyQt6.QtGui import QKeyEvent, QCursor
 
 from src.core.config import Config
 from src.core.data_streamer import EEGDataStreamer
@@ -63,6 +64,7 @@ class AnnotationROI(pg.ROI):
         super().hoverEvent(ev)
 
     def _on_clicked(self, _roi, ev):
+        print("ROI Clicked")
         if ev.button() == pg.QtCore.Qt.MouseButton.RightButton:
             label_dialog = LabelDialog()
             try:
@@ -156,6 +158,12 @@ class EEGPlotWidget(QWidget):
         self.annotation_items: List[AnnotationROI] = []
         self.selected_annotation_roi = None  # Currently selected annotation for highlighting
 
+        # Drawing mode state
+        self._draw_mode = False
+        self._is_drawing = False
+        self._draw_start_pos = None  # QPointF in view coordinates
+        self._preview_rect = None  # QGraphicsRectItem for temporary preview
+
         # Flag to prevent signal cascading during programmatic range changes
         self._updating_range = False
 
@@ -168,6 +176,8 @@ class EEGPlotWidget(QWidget):
             self.state.spinner_value_changed.connect(self.change_window_duration)
             self.state.goto_input_return_pressed.connect(self.goto_time)
             self.state.undo_clicked.connect(self.undo_annotation)
+            self.state.montage_changed.connect(lambda: self._exit_draw_mode() if self._draw_mode else None)
+            self.state.filter_changed.connect(lambda: self._exit_draw_mode() if self._draw_mode else None)
 
         layout = QVBoxLayout()
         layout.addWidget(self.plot_widget)
@@ -186,14 +196,18 @@ class EEGPlotWidget(QWidget):
         # Disable auto-range for manual control
         self.plot_widget.disableAutoRange()
 
+        # Disable PyQtGraph's built-in context menu (ViewBox + PlotItem)
+        self.plot_widget.getPlotItem().setMenuEnabled(False)
+
         # Enable keyboard focus for arrow key navigation
         self.plot_widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         # Connect view range change signal for lazy loading
         self.plot_widget.sigRangeChanged.connect(self.on_view_range_changed)
 
-        # Install event filter for keyboard shortcuts
+        # Install event filter for keyboard shortcuts and drawing
         self.plot_widget.installEventFilter(self)
+        self.plot_widget.viewport().installEventFilter(self)
 
         # Plot items storage
         self.channel_curves = []
@@ -313,11 +327,27 @@ class EEGPlotWidget(QWidget):
         self.update_plot(start_time, duration)
 
     def eventFilter(self, obj, event):
-        """Handle keyboard events for pan navigation."""
+        """Handle keyboard and mouse events for navigation and drawing."""
+        # Mouse events are delivered to the viewport (QGraphicsView is a QAbstractScrollArea)
+        if obj == self.plot_widget.viewport() and self._draw_mode:
+            if event.type() == event.Type.MouseButtonPress:
+                if self._on_draw_mouse_press(event):
+                    return True
+            elif event.type() == event.Type.MouseMove:
+                if self._on_draw_mouse_move(event):
+                    return True
+            elif event.type() == event.Type.MouseButtonRelease:
+                if self._on_draw_mouse_release(event):
+                    return True
+
+        # Keyboard events are delivered to the plot widget
         if obj == self.plot_widget and event.type() == event.Type.KeyPress:
             key_event: QKeyEvent = event
 
-            if key_event.key() == Qt.Key.Key_A:
+            if key_event.key() == Qt.Key.Key_Escape and self._draw_mode:
+                self._exit_draw_mode()
+                return True
+            elif key_event.key() == Qt.Key.Key_A:
                 self.pan_left()
                 return True
             elif key_event.key() == Qt.Key.Key_D:
@@ -329,7 +359,7 @@ class EEGPlotWidget(QWidget):
             elif key_event.key() == Qt.Key.Key_Z and key_event.modifiers() & Qt.KeyboardModifier.ControlModifier:
                 self.undo_annotation()
                 return True
-            elif key_event.key() == Qt.Key.Key_L and key_event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            elif key_event.key() == Qt.Key.Key_L:
                 self.enable_selection_mode()
                 return True
 
@@ -393,42 +423,157 @@ class EEGPlotWidget(QWidget):
         self._set_x_range_and_update(time, time + self.window_duration)
 
     def enable_selection_mode(self):
-        """Enable annotation selection mode with rectangle selector."""
-        # Create selection rectangle
-        view_range = self.plot_widget.viewRange()
+        """Toggle annotation drawing mode."""
+        if self._draw_mode:
+            self._exit_draw_mode()
+        else:
+            self._enter_draw_mode()
 
-        x_start = view_range[0][0] + 1
-        x_end = view_range[0][0] + 3
-        width = 2
+    def _enter_draw_mode(self):
+        """Enter annotation drawing mode. Disables pan/zoom, changes cursor."""
+        self._draw_mode = True
+        self._is_drawing = False
 
-        y_start = view_range[1][0]
-        y_end = view_range[1][1]
-        height = y_end - y_start
+        # Disable ViewBox mouse interaction to prevent pan/zoom from consuming events
+        self.plot_widget.getViewBox().setMouseEnabled(x=False, y=False)
 
-        # Determine selected channels from Y position
+        # Change cursor to crosshair
+        self.plot_widget.setCursor(QCursor(Qt.CursorShape.CrossCursor))
+
+        # Create preview rectangle (hidden until drag starts)
+        self._preview_rect = QGraphicsRectItem()
+        self._preview_rect.setPen(pg.mkPen(color=(0, 0, 255, 200), width=2, style=Qt.PenStyle.DashLine))
+        self._preview_rect.setBrush(pg.mkBrush(0, 0, 255, 40))
+        self._preview_rect.setZValue(1e8)
+        self._preview_rect.hide()
+        self.plot_widget.getViewBox().addItem(self._preview_rect, ignoreBounds=True)
+
+        if self.state:
+            self.state.draw_mode_changed.emit(True)
+
+    def _exit_draw_mode(self):
+        """Exit annotation drawing mode. Restores pan/zoom and cursor."""
+        self._draw_mode = False
+        self._is_drawing = False
+        self._draw_start_pos = None
+
+        # Re-enable ViewBox mouse interaction
+        self.plot_widget.getViewBox().setMouseEnabled(x=True, y=True)
+
+        # Restore default cursor
+        self.plot_widget.unsetCursor()
+
+        # Remove preview rectangle
+        if self._preview_rect is not None:
+            self.plot_widget.getViewBox().removeItem(self._preview_rect)
+            self._preview_rect = None
+
+        if self.state:
+            self.state.draw_mode_changed.emit(False)
+
+    def _on_draw_mouse_press(self, event) -> bool:
+        """Handle mouse press in drawing mode. Records start position."""
+        if event.button() != Qt.MouseButton.LeftButton:
+            return False
+
+        # Map widget position to view (data) coordinates
+        view_box = self.plot_widget.getViewBox()
+        scene_pos = self.plot_widget.mapToScene(event.position().toPoint())
+        view_pos = view_box.mapSceneToView(scene_pos)
+
+        self._draw_start_pos = view_pos
+        self._is_drawing = True
+
+        # Show preview rectangle at zero size
+        self._preview_rect.setRect(QRectF(view_pos, view_pos))
+        self._preview_rect.show()
+
+        return True
+
+    def _on_draw_mouse_move(self, event) -> bool:
+        """Handle mouse move in drawing mode. Updates preview rectangle."""
+        if not self._is_drawing or self._draw_start_pos is None:
+            return False
+
+        view_box = self.plot_widget.getViewBox()
+        scene_pos = self.plot_widget.mapToScene(event.position().toPoint())
+        view_pos = view_box.mapSceneToView(scene_pos)
+
+        # Update preview rectangle (normalized handles any drag direction)
+        rect = QRectF(self._draw_start_pos, view_pos).normalized()
+        self._preview_rect.setRect(rect)
+
+        return True
+
+    def _on_draw_mouse_release(self, event) -> bool:
+        """Handle mouse release in drawing mode. Creates AnnotationROI from drawn rect."""
+        if event.button() != Qt.MouseButton.LeftButton:
+            return False
+        if not self._is_drawing or self._draw_start_pos is None:
+            return False
+
+        view_box = self.plot_widget.getViewBox()
+        scene_pos = self.plot_widget.mapToScene(event.position().toPoint())
+        view_pos = view_box.mapSceneToView(scene_pos)
+
+        # Build final rectangle
+        rect = QRectF(self._draw_start_pos, view_pos).normalized()
+
+        # Hide preview and reset drawing state
+        self._preview_rect.hide()
+        self._is_drawing = False
+        self._draw_start_pos = None
+
+        # Minimum size threshold to prevent accidental clicks
+        min_width = 0.2  # seconds
+        min_height = 0.5 * self.scale_factor
+        if rect.width() < min_width or rect.height() < min_height:
+            self._exit_draw_mode()
+            return True
+
+        # Clamp to plot bounds
+        plot_bounds = self._get_plot_bounds()
+        rect = rect.intersected(plot_bounds)
+        if rect.isEmpty():
+            self._exit_draw_mode()
+            return True
+
+        # Map Y coordinates to channel indices
+        x_start = rect.left()
+        x_end = rect.right()
+        y_start = rect.top()
+        y_end = rect.bottom()
+
         first_ch = max(0, int(min(y_start, y_end) / self.scale_factor))
         last_ch = min(len(self.montage_list) - 1, int(max(y_start, y_end) / self.scale_factor))
         selected_channels = self.montage_list[first_ch:last_ch + 1]
 
-        # Use default label "BCKG" (index 14 in config.diagnosis)
-        default_label = "BCKG"
+        if len(selected_channels) == 0:
+            self._exit_draw_mode()
+            return True
 
-        # Store annotation data
         annotation_data = {
             "channels": selected_channels,
             "start_time": round(x_start),
             "stop_time": round(x_end),
-            "onset": default_label,
+            "onset": "BCKG",
         }
-        # Create ROI for selection (draggable rectangle)
-        annotation_roi = AnnotationROI(pos=[x_start, y_start], size=[width, height], data=annotation_data)
 
-        # Create editable annotation rectangle
+        annotation_roi = AnnotationROI(
+            pos=[rect.left(), rect.top()],
+            size=[rect.width(), rect.height()],
+            data=annotation_data,
+        )
+
         self._create_editable_annotation_rect(annotation_roi)
 
-        # Enable undo button
         if self.state:
             self.state.enable_undo_button.emit(True)
+
+        # Exit draw mode after creating annotation
+        self._exit_draw_mode()
+
+        return True
 
     def _get_plot_bounds(self) -> QRectF:
         """Get the plot boundaries as a QRectF for constraining annotation movement."""

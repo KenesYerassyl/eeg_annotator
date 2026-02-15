@@ -9,6 +9,7 @@ class AppState(QObject):
     filter_changed = pyqtSignal()
     
     label_clicked = pyqtSignal()
+    draw_mode_changed = pyqtSignal(bool)
     spinner_value_changed = pyqtSignal(int)
     goto_input_return_pressed = pyqtSignal(int)
     undo_clicked = pyqtSignal()

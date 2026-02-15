@@ -53,7 +53,9 @@ class ControlToolBar(QToolBar):
         self.label_btn = QPushButton("Label")
         self.label_btn.setIcon(QIcon(resource_path("resources/icons/add-selection.png", to_string=True)))
         self.label_btn.setEnabled(False)
+        self.label_btn.setCheckable(True)
         self.label_btn.clicked.connect(self.on_label_clicked)
+        self.state.draw_mode_changed.connect(self.label_btn.setChecked)
 
         # Validators for numeric inputs
         int_validator = QIntValidator()
