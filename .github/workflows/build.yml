@@ -87,7 +87,47 @@ jobs:
       - name: Build with PyInstaller
         run: pyinstaller main.spec
 
-      # --- Step 5: Show build size in the logs ---
+      # --- Step 5: Re-sign all binaries with a consistent ad-hoc identity (macOS only) ---
+      #
+      # WHY THIS IS NEEDED:
+      #   The Python.framework bundled by PyInstaller was originally signed by python.org
+      #   with their real Developer ID certificate (a real Team ID). Our main executable
+      #   is signed ad-hoc (no Team ID). macOS rejects this mismatch at load time:
+      #   "mapping process and mapped file (non-platform) have different Team IDs"
+      #
+      # THE FIX:
+      #   Force-resign EVERY binary in the bundle with ad-hoc "-" identity, inside-out
+      #   (deepest binaries first, the .app bundle last). --force overrides existing sigs.
+      #
+      # ORDER MATTERS:
+      #   .so/.dylib → Python.framework binary → other frameworks → main exe → .app
+      - name: Re-sign all binaries ad-hoc (macOS)
+        if: runner.os != 'Windows'
+        run: |
+          APP="dist/eeg_annotator.app"
+
+          echo "--- Step 1: Sign all .so and .dylib files ---"
+          find "$APP" -type f \( -name "*.so" -o -name "*.dylib" \) -print0 \
+            | xargs -0 -I{} codesign --force --sign - {}
+
+          echo "--- Step 2: Re-sign Python.framework binary (overrides python.org signature) ---"
+          find "$APP" -path "*/Python.framework/Versions/*/Python" -type f \
+            | xargs -I{} codesign --force --sign - {}
+
+          echo "--- Step 3: Sign each .framework bundle (after their inner binaries) ---"
+          find "$APP/Contents/Frameworks" -maxdepth 1 -name "*.framework" -type d \
+            | xargs -I{} codesign --force --sign - {}
+
+          echo "--- Step 4: Sign the main executable ---"
+          codesign --force --sign - "$APP/Contents/MacOS/eeg_annotator"
+
+          echo "--- Step 5: Sign the .app bundle itself ---"
+          codesign --force --sign - "$APP"
+
+          echo "--- Verify ---"
+          codesign --verify --verbose=2 "$APP"
+
+      # --- Step 6: Show build size in the logs ---
       # This prints the total bundle size so you can monitor for bloat.
       # Target: under 200MB. If it grows past that, check what's being included.
       - name: Log build size (macOS)
