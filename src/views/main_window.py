@@ -36,6 +36,8 @@ class EEGAnnotator(QMainWindow):
         self.setWindowTitle("Ziyatron EEG Annotator v2.0")
         self.resize(1400, 800)
 
+        self.filename = None  # Set by open_file(); guards on_settings_changed / on_scale_changed
+
         # Application state
         self.state = AppState()
         self.state.montage_changed.connect(self.on_settings_changed)
