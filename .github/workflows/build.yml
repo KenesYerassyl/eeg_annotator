@@ -95,8 +95,18 @@ jobs:
         run: |
           echo "=== Build output ==="
           ls -lah dist/
-          echo "=== Total bundle size ==="
-          du -sh dist/eeg_annotator/
+          echo "=== App bundle size ==="
+          du -sh dist/eeg_annotator.app/
+
+      # Confirms PyInstaller applied ad-hoc signatures to the .app bundle.
+      # Ad-hoc signing (identity "-") is free, requires no Apple Developer account,
+      # and satisfies macOS SIP on both Intel and Apple Silicon.
+      # Users will still see a Gatekeeper warning on first launch — right-click → Open bypasses it.
+      - name: Verify ad-hoc signing (macOS)
+        if: runner.os != 'Windows'
+        run: |
+          codesign --verify --verbose dist/eeg_annotator.app || echo "Warning: signing check failed"
+          codesign -dvvv dist/eeg_annotator.app 2>&1 | grep -E "Authority|TeamIdentifier|Signature|Format"
 
       - name: Log build size (Windows)
         if: runner.os == 'Windows'
@@ -109,11 +119,15 @@ jobs:
       # --- Step 6: Create a ZIP file ---
       # Packages the entire dist/eeg_annotator/ folder into a single ZIP.
       # Named "eeg_annotator-macOS.zip" or "eeg_annotator-Windows.zip".
+      # Use ditto instead of zip — it preserves symlinks inside Qt .framework bundles.
+      # Plain zip -r breaks those symlinks, causing the app to crash on launch.
+      # --sequesterRsrc preserves macOS resource forks; --keepParent includes the .app name in the archive.
       - name: Create ZIP archive (macOS)
         if: runner.os != 'Windows'
         run: |
-          cd dist
-          zip -r ../eeg_annotator-${{ runner.os }}.zip eeg_annotator/
+          ditto -c -k --sequesterRsrc --keepParent \
+            dist/eeg_annotator.app \
+            eeg_annotator-${{ runner.os }}.zip
 
       - name: Create ZIP archive (Windows)
         if: runner.os == 'Windows'
@@ -192,7 +206,7 @@ jobs:
             1. Download the ZIP file for your platform
             2. Extract the archive
             3. Run the `eeg_annotator` executable
-            4. **macOS users**: If you see a security warning, right-click the app and select "Open"
+            4. **macOS users**: Unzip, then right-click `eeg_annotator.app` → **Open** (first launch only, to bypass Gatekeeper). Move to Applications folder if desired.
 
             ---
           draft: false

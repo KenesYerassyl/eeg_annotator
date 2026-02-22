@@ -12,6 +12,8 @@ Key optimizations:
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 import sys
 
+is_mac = sys.platform == 'darwin'
+
 # ===== SELECTIVE MNE DATA COLLECTION =====
 # Only include necessary MNE data, exclude tests/examples/datasets
 mne_data = collect_data_files(
@@ -125,24 +127,50 @@ exe = EXE(
     name='eeg_annotator',
     debug=False,
     bootloader_ignore_signals=False,
-    strip=True,  # Strip debug symbols (ENABLED for size reduction)
-    upx=True,    # UPX compression
-    console=False,  # No console window (GUI app)
+    strip=True,              # Strip debug symbols (ENABLED for size reduction)
+    upx=not is_mac,          # UPX disabled on macOS (breaks Mach-O signatures on Apple Silicon)
+    console=False,           # No console window (GUI app)
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
-    codesign_identity=None,
+    codesign_identity='-' if is_mac else None,  # Ad-hoc signing on macOS (free, no Developer ID needed)
     entitlements_file=None,
 )
 
-# ===== COLLECT =====
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    strip=True,  # Strip binaries (ENABLED for size reduction)
-    upx=True,    # UPX compression
-    upx_exclude=[],
-    name='eeg_annotator',
-)
+# ===== BUNDLE (macOS .app) / COLLECT (Windows/Linux folder) =====
+# macOS: produces dist/eeg_annotator.app — a proper double-clickable .app bundle
+#        with ad-hoc code signatures applied automatically by PyInstaller.
+#        Users see a Gatekeeper warning on first launch; right-click → Open bypasses it.
+# Windows/Linux: produces dist/eeg_annotator/ folder as before.
+if is_mac:
+    app = BUNDLE(
+        exe,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        strip=True,
+        upx=False,   # Never UPX on macOS
+        name='eeg_annotator.app',
+        icon=None,   # No .icns file in resources/icons/ — add one to enable custom icon
+        bundle_identifier='com.ziyatron.eeg-annotator',
+        info_plist={
+            'CFBundleName': 'EEG Annotator',
+            'CFBundleDisplayName': 'Ziyatron EEG Annotator',
+            'CFBundleVersion': '2.0',
+            'CFBundleShortVersionString': '2.0',
+            'NSHighResolutionCapable': True,
+            'LSMinimumSystemVersion': '10.15.0',
+            'NSHumanReadableCopyright': 'Ziyatron',
+        },
+    )
+else:
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        strip=True,
+        upx=True,    # UPX compression fine on Windows/Linux
+        upx_exclude=[],
+        name='eeg_annotator',
+    )
