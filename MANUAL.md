@@ -51,6 +51,8 @@ Ziyatron EEG Annotator loads EDF recordings and lets you mark, label, resize, mo
 | High filter (Hz) | Low-pass filter cutoff |
 | Apply Filter | Apply the entered filter values |
 | Scale (µV/mm) | Adjust vertical amplitude of channels |
+| Label dropdown | Filter annotation jumps by type (ALL or specific label) |
+| Jump | Center view on nearest annotation matching the selected label |
 
 **Menu bar:** File → Open EDF, Save Annotations, Exit
 
@@ -81,6 +83,25 @@ Ziyatron EEG Annotator loads EDF recordings and lets you mark, label, resize, mo
 ### Jumping to a Specific Time
 
 Type a time in seconds into the **Goto** field and press **Enter**. The view jumps to that position.
+
+### Jumping Between Annotations
+
+The annotation jump controls are in the **bottom toolbar row**, to the right of the Scale dropdown:
+
+| Control | Purpose |
+|---|---|
+| Label dropdown | Filter by annotation type — **ALL** or any specific label (e.g. SEIZ, BCKG) |
+| **Jump** button | Center the view on the nearest annotation matching the selected label |
+| **← Left arrow** key | Jump to the previous annotation (relative to the last jump position) |
+| **→ Right arrow** key | Jump to the next annotation (relative to the last jump position) |
+
+**How it works:**
+- Press **Jump** to instantly center the view on the nearest annotation to your current position. This also sets a cursor so that subsequent arrow key presses navigate sequentially from there.
+- Press **→** / **←** to step forward or backward through annotations one at a time.
+- If no label is selected (ALL), navigation visits every annotation in time order. If a specific label is selected, only annotations with that label are visited.
+- If you have not yet pressed Jump, the first arrow key press behaves like Jump (jumps to nearest), then subsequent presses step from there.
+
+> The Jump button is enabled only after a file is loaded.
 
 ### Changing the Visible Window
 
@@ -315,6 +336,8 @@ Multi-channel annotations are stored as multiple rows with the same time and lab
 | **A** | Pan left 10 seconds |
 | **D** | Pan right 10 seconds |
 | **Enter** (in Goto field) | Jump to typed time position |
+| **→ Right arrow** | Jump to next annotation (filtered by label dropdown) |
+| **← Left arrow** | Jump to previous annotation (filtered by label dropdown) |
 | Mouse drag | Pan freely |
 | Scroll wheel | Zoom in / out |
 
