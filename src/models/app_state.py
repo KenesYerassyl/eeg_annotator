@@ -31,6 +31,8 @@ class AppState(QObject):
     goto_input_return_pressed = pyqtSignal(int)
     undo_clicked = pyqtSignal()
     enable_undo_button = pyqtSignal(bool)
+    jump_label_changed = pyqtSignal(str)
+    jump_requested = pyqtSignal()
 
     def __init__(self):
         super().__init__()

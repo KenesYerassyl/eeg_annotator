@@ -15,6 +15,7 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 
+import bisect
 from typing import List, Dict, Optional, Tuple
 
 import pyqtgraph as pg
@@ -30,11 +31,9 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QKeyEvent, QCursor
 
-from src.core.config import Config
+from src.core.config import config
 from src.core.data_streamer import EEGDataStreamer
 
-
-config = Config()
 
 class AnnotationROI(pg.ROI):
     sigSelected = pg.QtCore.Signal(object)  # emits self when left-clicked
@@ -191,6 +190,11 @@ class EEGPlotWidget(QWidget):
         self._clipboard_annotation = None    # Copied annotation data dict
         self._last_mouse_view_pos = None     # Cursor position in view coords (QPointF)
 
+        # Jump navigation state
+        self._sorted_annotations: list = []  # list of (start_time, AnnotationROI), sorted
+        self._jump_cursor = None              # last AnnotationROI jumped to
+        self._jump_label: str = "ALL"
+
         # Drawing mode state
         self._draw_mode = False
         self._is_drawing = False
@@ -211,6 +215,8 @@ class EEGPlotWidget(QWidget):
             self.state.undo_clicked.connect(self.undo_annotation)
             self.state.montage_changed.connect(lambda: self._exit_draw_mode() if self._draw_mode else None)
             self.state.filter_changed.connect(lambda: self._exit_draw_mode() if self._draw_mode else None)
+            self.state.jump_label_changed.connect(self._on_jump_label_changed)
+            self.state.jump_requested.connect(self._on_jump_requested)
 
         layout = QVBoxLayout()
         layout.addWidget(self.plot_widget)
@@ -423,6 +429,12 @@ class EEGPlotWidget(QWidget):
                 return True
             elif key_event.key() == Qt.Key.Key_L:
                 self.enable_selection_mode()
+                return True
+            elif key_event.key() == Qt.Key.Key_Right:
+                self.jump_to_next(self._jump_label)
+                return True
+            elif key_event.key() == Qt.Key.Key_Left:
+                self.jump_to_prev(self._jump_label)
                 return True
 
         return super().eventFilter(obj, event)
@@ -659,6 +671,7 @@ class EEGPlotWidget(QWidget):
         self.plot_widget.addItem(annotation_roi.text_item)
 
         self.annotation_items.append(annotation_roi)
+        self._rebuild_jump_index()
 
         return annotation_roi
 
@@ -698,6 +711,10 @@ class EEGPlotWidget(QWidget):
         annotation_data["start_time"] = round(x_start)
         annotation_data["stop_time"] = round(x_end)
 
+        # Position changed — rebuild sorted index and reset cursor
+        self._jump_cursor = None
+        self._rebuild_jump_index()
+
     def _delete_annotation(self, annotation_roi: AnnotationROI):
         """Delete annotation from both visual items and data."""
         if not annotation_roi:
@@ -720,6 +737,11 @@ class EEGPlotWidget(QWidget):
         # Clear selection if deleted annotation was selected
         if self.selected_annotation_roi is annotation_roi:
             self.selected_annotation_roi = None
+
+        # Reset jump cursor if deleted annotation was the cursor
+        if self._jump_cursor is annotation_roi:
+            self._jump_cursor = None
+        self._rebuild_jump_index()
 
         # Disable undo button if no more annotations
         if len(self.annotation_items) == 0 and self.state:
@@ -845,6 +867,8 @@ class EEGPlotWidget(QWidget):
             )
             self._create_editable_annotation_rect(annotation_roi)
 
+        self._jump_cursor = None
+
     def undo_annotation(self):
         """Remove the last annotation."""
         if len(self.annotation_items) == 0:
@@ -868,9 +892,81 @@ class EEGPlotWidget(QWidget):
         if self.selected_annotation_roi is annotation_roi:
             self.selected_annotation_roi = None
 
+        # Reset jump cursor if undone annotation was the cursor
+        if self._jump_cursor is annotation_roi:
+            self._jump_cursor = None
+        self._rebuild_jump_index()
+
         # Disable undo button if no more annotations
         if len(self.annotation_items) == 0 and self.state:
             self.state.enable_undo_button.emit(False)
+
+    def _rebuild_jump_index(self):
+        """Rebuild the sorted annotation index used for jump navigation."""
+        self._sorted_annotations = sorted(
+            ((roi.data["start_time"], roi) for roi in self.annotation_items),
+            key=lambda t: t[0]
+        )
+
+    def _filtered_sorted_annotations(self, label: str) -> list:
+        """Return sorted annotations filtered by label ('ALL' returns all)."""
+        if label == "ALL":
+            return self._sorted_annotations
+        return [(t, roi) for t, roi in self._sorted_annotations if roi.data["onset"] == label]
+
+    def _jump_to_annotation(self, roi: "AnnotationROI"):
+        self._jump_cursor = roi
+        self.goto_time(roi.data["start_time"])
+
+    def jump_to_nearest(self, label: str):
+        """Jump to the annotation nearest to the current view center."""
+        candidates = self._filtered_sorted_annotations(label)
+        if not candidates:
+            return
+        view_range = self.plot_widget.viewRange()
+        view_center = sum(view_range[0]) / 2.0
+        starts = [t for t, _ in candidates]
+        idx = bisect.bisect_left(starts, view_center)
+        best_roi, best_dist = None, float('inf')
+        for i in (idx - 1, idx):
+            if 0 <= i < len(candidates):
+                dist = abs(candidates[i][0] - view_center)
+                if dist < best_dist:
+                    best_dist, best_roi = dist, candidates[i][1]
+        if best_roi:
+            self._jump_to_annotation(best_roi)
+
+    def jump_to_next(self, label: str):
+        self._jump_in_direction(label, forward=True)
+
+    def jump_to_prev(self, label: str):
+        self._jump_in_direction(label, forward=False)
+
+    def _jump_in_direction(self, label: str, forward: bool):
+        candidates = self._filtered_sorted_annotations(label)
+        if not candidates:
+            return
+        if self._jump_cursor is None:
+            self.jump_to_nearest(label)
+            return
+        starts = [t for t, _ in candidates]
+        cur_start = self._jump_cursor.data["start_time"]
+        if forward:
+            idx = bisect.bisect_right(starts, cur_start)
+            if idx < len(candidates):
+                self._jump_to_annotation(candidates[idx][1])
+        else:
+            idx = bisect.bisect_left(starts, cur_start) - 1
+            if idx >= 0:
+                self._jump_to_annotation(candidates[idx][1])
+
+    def _on_jump_label_changed(self, label: str):
+        """Update the active jump label filter."""
+        self._jump_label = label
+
+    def _on_jump_requested(self):
+        """Handle Jump button press — jump to nearest matching annotation."""
+        self.jump_to_nearest(self._jump_label)
 
     def update_y_axis(self):
         """Update Y-axis ticks and range to match current scale factor.

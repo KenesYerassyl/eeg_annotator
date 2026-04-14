@@ -75,3 +75,6 @@ class Config:
         'IFCN',
     ]
     pan_ammount: int = 10
+
+
+config = Config()

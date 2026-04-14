@@ -31,6 +31,7 @@ from PyQt6.QtWidgets import (
 
 from src.utils.path_utils import resource_path
 from src.core.montage_manager import montage_manager
+from src.core.config import config
 from src.models.app_state import AppState
 
 
@@ -101,6 +102,17 @@ class ControlToolBar(QToolBar):
         self.select_scale.currentTextChanged.connect(self.on_scale_changed)
         self.state.set_scale(int(self.select_scale.currentText().replace(' µV/mm', '')))
 
+        # Jump navigation controls
+        self.jump_label_combo = QComboBox()
+        self.jump_label_combo.addItem("ALL")
+        self.jump_label_combo.addItems(config.diagnosis)
+        self.jump_label_combo.setFixedWidth(100)
+        self.jump_label_combo.currentTextChanged.connect(self.on_jump_label_changed)
+
+        self.jump_btn = QPushButton("Jump")
+        self.jump_btn.setEnabled(False)
+        self.jump_btn.clicked.connect(self.on_jump_clicked)
+
         # Display time controls
         self.spinner_label = QLabel("Display duration: ")
         self.x_lim_spinner = QSpinBox()
@@ -144,6 +156,8 @@ class ControlToolBar(QToolBar):
         action_layout.addWidget(self.high_filter)
         action_layout.addWidget(self.apply_filter_btn)
         action_layout.addWidget(self.select_scale)
+        action_layout.addWidget(self.jump_label_combo)
+        action_layout.addWidget(self.jump_btn)
         action_layout.setContentsMargins(0, 0, 0, 0)
 
         tools_widget = QWidget()
@@ -173,6 +187,7 @@ class ControlToolBar(QToolBar):
 
         self.signal_duration_lbl.setText(f"Duration: {signal_duration:.1f}s ")
         self.sampling_freq_lbl.setText(f"Sampling: {s_freq:.0f}Hz")
+        self.jump_btn.setEnabled(True)
 
     def on_montage_changed(self, new_montage: str):
         """Handle montage selection change."""
@@ -213,3 +228,11 @@ class ControlToolBar(QToolBar):
     def on_scale_changed(self, v: str):
         """Handle scale selection change."""
         self.state.set_scale(int(v.replace(' µV/mm', '')))
+
+    def on_jump_label_changed(self, label: str):
+        """Emit jump label change signal."""
+        self.state.jump_label_changed.emit(label)
+
+    def on_jump_clicked(self):
+        """Emit jump requested signal."""
+        self.state.jump_requested.emit()
